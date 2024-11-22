@@ -1,10 +1,7 @@
 package com.example;
 
 import org.pcap4j.core.*;
-import org.pcap4j.packet.IpV4Packet;
-import org.pcap4j.packet.Packet;
-import org.pcap4j.packet.TcpPacket;
-import org.pcap4j.packet.UnknownPacket;
+import org.pcap4j.packet.*;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -72,6 +69,7 @@ public class IntrusionDetectionSystem {
             }
 
             detectPortScanning(srcIp, ipV4Packet);
+            deepPacketInspection(packet);
         }
 
         // Check for TCP-specific information if available
@@ -80,6 +78,25 @@ public class IntrusionDetectionSystem {
             int srcPort = tcpPacket.getHeader().getSrcPort().valueAsInt();
             int dstPort = tcpPacket.getHeader().getDstPort().valueAsInt();
             System.out.println("TCP Packet: Src Port: " + srcPort + ", Dst Port: " + dstPort);
+        }
+    }
+
+    private static void deepPacketInspection(Packet packet) {
+
+        TcpPacket tcpPacket = packet.get(TcpPacket.class);
+        if (tcpPacket != null) {
+            byte[] payload = tcpPacket.getPayload() != null ? tcpPacket.getPayload().getRawData() : new byte[0];
+            String payloadStr = new String(payload);
+
+            System.out.println(payloadStr);
+        }
+
+        UdpPacket udpPacket = packet.get(UdpPacket.class);
+        if (udpPacket != null) {
+            byte[] payload = udpPacket.getPayload() != null ? udpPacket.getPayload().getRawData() : new byte[0];
+            String payloadStr = new String(payload);
+
+            System.out.println(payloadStr);
         }
     }
 
