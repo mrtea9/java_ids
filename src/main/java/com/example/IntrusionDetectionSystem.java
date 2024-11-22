@@ -88,6 +88,10 @@ public class IntrusionDetectionSystem {
             byte[] payload = tcpPacket.getPayload() != null ? tcpPacket.getPayload().getRawData() : new byte[0];
             String payloadStr = new String(payload);
 
+            if (payloadStr.contains("GET") || payloadStr.contains("POST")) System.out.println("HTTP packet: " + payloadStr);
+
+            if (payloadStr.contains("SELECT") || payloadStr.contains("<script>")) System.out.println("ALERT: " + payloadStr);
+
             System.out.println(payloadStr);
         }
 
@@ -95,6 +99,8 @@ public class IntrusionDetectionSystem {
         if (udpPacket != null) {
             byte[] payload = udpPacket.getPayload() != null ? udpPacket.getPayload().getRawData() : new byte[0];
             String payloadStr = new String(payload);
+
+            if (payloadStr.contains("tunnel") || payloadStr.contains("malicious")) System.out.println("ALERT UDP: " + payloadStr);
 
             System.out.println(payloadStr);
         }
