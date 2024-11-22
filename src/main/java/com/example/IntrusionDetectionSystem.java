@@ -16,14 +16,18 @@ public class IntrusionDetectionSystem {
     private static final int READ_TIMEOUT = 50;     // In milliseconds
     private static final int TRAFFIC_THRESHOLD = 100; // Packet count threshold
     private static final int THREAD_POOL_SIZE = 10;
+    private static final int SYN_FLOOD_THRESHOLD = 5;
 
     private static final Map<String, Integer> trafficCount = new ConcurrentHashMap<>();
     private static final Map<String, Set<Integer>> portScanTracker = new ConcurrentHashMap<>();
+    private static final Map<String, ConnectionState> connectionTracker = new ConcurrentHashMap<>();
+    private static final Map<String, Integer> incompleteConnections = new ConcurrentHashMap<>();
     private static final ExecutorService executor = Executors.newFixedThreadPool(THREAD_POOL_SIZE);
 
     public static void main( String[] args ) {
         try {
-            PcapNetworkInterface nif = Pcaps.findAllDevs().get(0);
+            System.out.println("da2a2");
+            PcapNetworkInterface nif = Pcaps.getDevByName("eth0");
             if (nif == null) {
                 System.out.println("No network interface found");
                 return;
@@ -31,8 +35,6 @@ public class IntrusionDetectionSystem {
             System.out.println("Listening on interface " + nif.getName());
 
             PcapHandle handle = nif.openLive(SNAPSHOT_LENGTH, PcapNetworkInterface.PromiscuousMode.PROMISCUOUS, READ_TIMEOUT);
-
-            Map<String, Integer> trafficCount = new HashMap<>();
 
             handle.loop(-1, (PacketListener) packet -> executor.submit(() -> processPacket(packet)));
 
@@ -70,6 +72,7 @@ public class IntrusionDetectionSystem {
 
             detectPortScanning(srcIp, ipV4Packet);
             deepPacketInspection(packet);
+            trackConnection(ipV4Packet);
         }
 
         // Check for TCP-specific information if available
@@ -118,5 +121,66 @@ public class IntrusionDetectionSystem {
         if (portScanTracker.get(srcIp).size() > 10) {
             System.out.println("ALERT: Potential port scanning activity from IP: " + srcIp);
         }
+    }
+
+    private static void trackConnection(IpV4Packet ipV4Packet) {
+        TcpPacket tcpPacket = ipV4Packet.get(TcpPacket.class);
+        if (tcpPacket != null) {
+            String srcIp = ipV4Packet.getHeader().getSrcAddr().getHostAddress();
+            String dstIp = ipV4Packet.getHeader().getSrcAddr().getHostAddress();
+            int srcPort = tcpPacket.getHeader().getSrcPort().valueAsInt();
+            int dstPort = tcpPacket.getHeader().getDstPort().valueAsInt();
+            String connectionKey = srcIp + ":" + srcPort + " -> " + dstIp + ":" + dstPort;
+
+
+            TcpPacket.TcpHeader tcpHeader = tcpPacket.getHeader();
+            ConnectionState state = connectionTracker.getOrDefault(connectionKey, ConnectionState.NONE);
+            System.out.println("Tracking connection for packet: " + connectionKey + " SYN: " + tcpHeader.getSyn() + " ACK: " + tcpHeader.getAck());
+
+            switch (state) {
+                case NONE:
+                    if (tcpHeader.getSyn() && !tcpHeader.getAck()) {
+                        connectionTracker.put(connectionKey, ConnectionState.SYN_SENT);
+                        incompleteConnections.merge(srcIp, 1, Integer::sum);
+                        System.out.println("Connection started: " + connectionKey);
+                    }
+                    break;
+                case SYN_SENT:
+                    if (tcpHeader.getSyn() && tcpHeader.getAck()) connectionTracker.put(connectionKey, ConnectionState.SYN_RECEIVED);
+                    break;
+                case SYN_RECEIVED:
+                    if (tcpHeader.getAck()) {
+                        connectionTracker.put(connectionKey, ConnectionState.ESTABLISHED);
+                        incompleteConnections.merge(srcIp, -1, Integer::sum);
+                        System.out.println("Connection established: " + connectionKey);
+                    }
+                    break;
+                case ESTABLISHED:
+                    if (tcpHeader.getFin()) {
+                        connectionTracker.put(connectionKey, ConnectionState.FIN_WAIT);
+                        System.out.println("Connection termination initiated: " + connectionKey);
+                    }
+                    break;
+                case FIN_WAIT:
+                    if (tcpHeader.getAck()) {
+                        connectionTracker.put(connectionKey, ConnectionState.CLOSED);
+                        System.out.println("Connection closed: " + connectionKey);
+                    }
+                    break;
+            }
+
+            if (incompleteConnections.getOrDefault(srcIp, 0) > 1) {
+                System.out.println("ALERT: Potential SYN flood attack detected from IP: " + srcIp);
+            }
+        }
+    }
+
+    private enum ConnectionState {
+        NONE,
+        SYN_SENT,
+        SYN_RECEIVED,
+        ESTABLISHED,
+        FIN_WAIT,
+        CLOSED
     }
 }
